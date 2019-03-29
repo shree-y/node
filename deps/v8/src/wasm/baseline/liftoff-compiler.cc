@@ -1736,6 +1736,9 @@ class LiftoffCompiler {
     if (imm.sig->return_count() > 1) {
       return unsupported(decoder, "multi-return");
     }
+    if (imm.table_index != 0) {
+      return unsupported(decoder, "table index != 0");
+    }
     if (imm.sig->return_count() == 1 &&
         !CheckSupportedType(decoder, kSupportedTypes, imm.sig->GetReturn(0),
                             "return")) {
@@ -2004,12 +2007,12 @@ WasmCompilationResult LiftoffCompilationUnit::ExecuteCompilation(
   LiftoffCompiler* compiler = &decoder.interface();
   if (decoder.failed()) {
     compiler->OnFirstError(&decoder);
-    return WasmCompilationResult{decoder.error()};
+    return WasmCompilationResult{};
   }
   if (!compiler->ok()) {
     // Liftoff compilation failed.
     counters->liftoff_unsupported_functions()->Increment();
-    return WasmCompilationResult{WasmError{0, "Liftoff bailout"}};
+    return WasmCompilationResult{};
   }
 
   counters->liftoff_compiled_functions()->Increment();
@@ -2029,6 +2032,7 @@ WasmCompilationResult LiftoffCompilationUnit::ExecuteCompilation(
   result.protected_instructions = compiler->GetProtectedInstructions();
   result.frame_slot_count = compiler->GetTotalFrameSlotCount();
   result.tagged_parameter_slots = call_descriptor->GetTaggedParameterSlots();
+  result.result_tier = ExecutionTier::kBaseline;
 
   DCHECK(result.succeeded());
   return result;

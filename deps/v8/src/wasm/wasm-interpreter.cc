@@ -966,9 +966,6 @@ class CodeMap {
   Zone* zone_;
   const WasmModule* module_;
   ZoneVector<InterpreterCode> interpreter_code_;
-  // TODO(wasm): Remove this testing wart. It is needed because interpreter
-  // entry stubs are not generated in testing the interpreter in cctests.
-  bool call_indirect_through_module_ = false;
 
  public:
   CodeMap(const WasmModule* module, const uint8_t* module_start, Zone* zone)
@@ -986,12 +983,6 @@ class CodeMap {
     }
   }
 
-  bool call_indirect_through_module() { return call_indirect_through_module_; }
-
-  void set_call_indirect_through_module(bool val) {
-    call_indirect_through_module_ = val;
-  }
-
   const WasmModule* module() const { return module_; }
 
   InterpreterCode* GetCode(const WasmFunction* function) {
@@ -1003,36 +994,6 @@ class CodeMap {
   InterpreterCode* GetCode(uint32_t function_index) {
     DCHECK_LT(function_index, interpreter_code_.size());
     return Preprocess(&interpreter_code_[function_index]);
-  }
-
-  InterpreterCode* GetIndirectCode(uint32_t table_index, uint32_t entry_index) {
-    uint32_t saved_index;
-    USE(saved_index);
-    if (table_index >= module_->tables.size()) return nullptr;
-    // Mask table index for SSCA mitigation.
-    saved_index = table_index;
-    table_index &= static_cast<int32_t>((table_index - module_->tables.size()) &
-                                        ~static_cast<int32_t>(table_index)) >>
-                   31;
-    DCHECK_EQ(table_index, saved_index);
-    const WasmTable* table = &module_->tables[table_index];
-    if (entry_index >= table->values.size()) return nullptr;
-    // Mask entry_index for SSCA mitigation.
-    saved_index = entry_index;
-    entry_index &= static_cast<int32_t>((entry_index - table->values.size()) &
-                                        ~static_cast<int32_t>(entry_index)) >>
-                   31;
-    DCHECK_EQ(entry_index, saved_index);
-    uint32_t index = table->values[entry_index];
-    if (index >= interpreter_code_.size()) return nullptr;
-    // Mask index for SSCA mitigation.
-    saved_index = index;
-    index &= static_cast<int32_t>((index - interpreter_code_.size()) &
-                                  ~static_cast<int32_t>(index)) >>
-             31;
-    DCHECK_EQ(index, saved_index);
-
-    return GetCode(index);
   }
 
   InterpreterCode* Preprocess(InterpreterCode* code) {
@@ -1445,7 +1406,8 @@ class ThreadImpl {
         return pc + 1 + imm.length;
       }
       case kExprCallIndirect: {
-        CallIndirectImmediate<Decoder::kNoValidate> imm(decoder, code->at(pc));
+        CallIndirectImmediate<Decoder::kNoValidate> imm(kAllWasmFeatures,
+                                                        decoder, code->at(pc));
         return pc + 1 + imm.length;
       }
       default:
@@ -1540,6 +1502,13 @@ class ThreadImpl {
     sp_ = dest + arity;
   }
 
+  inline Address EffectiveAddress(uint32_t index) {
+    // Compute the effective address of the access, making sure to condition
+    // the index even in the in-bounds case.
+    return reinterpret_cast<Address>(instance_object_->memory_start()) +
+           (index & instance_object_->memory_mask());
+  }
+
   template <typename mtype>
   inline Address BoundsCheckMem(uint32_t offset, uint32_t index) {
     uint32_t effective_index = offset + index;
@@ -1550,10 +1519,15 @@ class ThreadImpl {
                     instance_object_->memory_size())) {
       return kNullAddress;  // oob
     }
-    // Compute the effective address of the access, making sure to condition
-    // the index even in the in-bounds case.
-    return reinterpret_cast<Address>(instance_object_->memory_start()) +
-           (effective_index & instance_object_->memory_mask());
+    return EffectiveAddress(effective_index);
+  }
+
+  inline bool BoundsCheckMemRange(uint32_t index, uint32_t* size,
+                                  Address* out_address) {
+    bool ok = ClampToBounds(
+        index, size, static_cast<uint32_t>(instance_object_->memory_size()));
+    *out_address = EffectiveAddress(index);
+    return ok;
   }
 
   template <typename ctype, typename mtype>
@@ -1609,6 +1583,15 @@ class ThreadImpl {
     return true;
   }
 
+  bool CheckDataSegmentIsPassiveAndNotDropped(uint32_t index, pc_t pc) {
+    DCHECK_LT(index, module()->num_declared_data_segments);
+    if (instance_object_->dropped_data_segments()[index]) {
+      DoTrap(kTrapDataSegmentDropped, pc);
+      return false;
+    }
+    return true;
+  }
+
   template <typename type, typename op_type>
   bool ExtractAtomicOpParams(Decoder* decoder, InterpreterCode* code,
                              Address& address, pc_t pc, int& len,
@@ -1654,6 +1637,86 @@ class ThreadImpl {
       case kExprI64UConvertSatF64:
         Push(WasmValue(ExecuteI64UConvertSatF64(Pop().to<double>())));
         return true;
+      case kExprMemoryInit: {
+        MemoryInitImmediate<Decoder::kNoValidate> imm(decoder, code->at(pc));
+        DCHECK_LT(imm.data_segment_index, module()->num_declared_data_segments);
+        len += imm.length;
+        if (!CheckDataSegmentIsPassiveAndNotDropped(imm.data_segment_index,
+                                                    pc)) {
+          return false;
+        }
+        auto size = Pop().to<uint32_t>();
+        auto src = Pop().to<uint32_t>();
+        auto dst = Pop().to<uint32_t>();
+        Address dst_addr;
+        bool ok = BoundsCheckMemRange(dst, &size, &dst_addr);
+        auto src_max =
+            instance_object_->data_segment_sizes()[imm.data_segment_index];
+        // Use & instead of && so the clamp is not short-circuited.
+        ok &= ClampToBounds(src, &size, src_max);
+        Address src_addr =
+            instance_object_->data_segment_starts()[imm.data_segment_index] +
+            src;
+        memory_copy_wrapper(dst_addr, src_addr, size);
+        if (!ok) DoTrap(kTrapMemOutOfBounds, pc);
+        return ok;
+      }
+      case kExprDataDrop: {
+        DataDropImmediate<Decoder::kNoValidate> imm(decoder, code->at(pc));
+        len += imm.length;
+        if (!CheckDataSegmentIsPassiveAndNotDropped(imm.index, pc)) {
+          return false;
+        }
+        instance_object_->dropped_data_segments()[imm.index] = 1;
+        return true;
+      }
+      case kExprMemoryCopy: {
+        MemoryCopyImmediate<Decoder::kNoValidate> imm(decoder, code->at(pc));
+        auto size = Pop().to<uint32_t>();
+        auto src = Pop().to<uint32_t>();
+        auto dst = Pop().to<uint32_t>();
+        Address dst_addr;
+        bool copy_backward = src < dst && dst - src < size;
+        bool ok = BoundsCheckMemRange(dst, &size, &dst_addr);
+        // Trap without copying any bytes if we are copying backward and the
+        // copy is partially out-of-bounds. We only need to check that the dst
+        // region is out-of-bounds, because we know that {src < dst}, so the src
+        // region is always out of bounds if the dst region is.
+        if (ok || !copy_backward) {
+          Address src_addr;
+          // Use & instead of && so the bounds check is not short-circuited.
+          ok &= BoundsCheckMemRange(src, &size, &src_addr);
+          memory_copy_wrapper(dst_addr, src_addr, size);
+        }
+        if (!ok) DoTrap(kTrapMemOutOfBounds, pc);
+        len += imm.length;
+        return ok;
+      }
+      case kExprMemoryFill: {
+        MemoryIndexImmediate<Decoder::kNoValidate> imm(decoder,
+                                                       code->at(pc + 1));
+        auto size = Pop().to<uint32_t>();
+        auto value = Pop().to<uint32_t>();
+        auto dst = Pop().to<uint32_t>();
+        Address dst_addr;
+        bool ok = BoundsCheckMemRange(dst, &size, &dst_addr);
+        memory_fill_wrapper(dst_addr, value, size);
+        if (!ok) DoTrap(kTrapMemOutOfBounds, pc);
+        len += imm.length;
+        return ok;
+      }
+      case kExprTableCopy: {
+        TableCopyImmediate<Decoder::kNoValidate> imm(decoder, code->at(pc));
+        auto size = Pop().to<uint32_t>();
+        auto src = Pop().to<uint32_t>();
+        auto dst = Pop().to<uint32_t>();
+        bool ok = WasmInstanceObject::CopyTableEntries(
+            instance_object_->GetIsolate(), instance_object_,
+            imm.table_dst.index, imm.table_src.index, dst, src, size);
+        if (!ok) DoTrap(kTrapTableOutOfBounds, pc);
+        len += imm.length;
+        return ok;
+      }
       default:
         FATAL("Unknown or unimplemented opcode #%d:%s", code->start[pc],
               OpcodeName(code->start[pc]));
@@ -2174,9 +2237,9 @@ class ThreadImpl {
                   true)
 #undef PACK_CASE
       case kExprS128Select: {
+        int4 bool_val = Pop().to_s128().to_i32x4();
         int4 v2 = Pop().to_s128().to_i32x4();
         int4 v1 = Pop().to_s128().to_i32x4();
-        int4 bool_val = Pop().to_s128().to_i32x4();
         int4 res;
         for (size_t i = 0; i < 4; ++i) {
           res.val[i] = v2.val[i] ^ ((v1.val[i] ^ v2.val[i]) & bool_val.val[i]);
@@ -2220,21 +2283,26 @@ class ThreadImpl {
         Push(WasmValue(Simd128(res)));
         return true;
       }
+      case kExprS1x4AnyTrue:
+      case kExprS1x8AnyTrue:
+      case kExprS1x16AnyTrue: {
+        int4 s = Pop().to_s128().to_i32x4();
+        bool res = s.val[0] | s.val[1] | s.val[2] | s.val[3];
+        Push(WasmValue((res)));
+        return true;
+      }
 #define REDUCTION_CASE(op, name, stype, count, operation) \
   case kExpr##op: {                                       \
     stype s = Pop().to_s128().to_##name();                \
-    int32_t res = s.val[0];                               \
-    for (size_t i = 1; i < count; ++i) {                  \
-      res = res operation static_cast<int32_t>(s.val[i]); \
+    bool res = true;                                      \
+    for (size_t i = 0; i < count; ++i) {                  \
+      res = res & static_cast<bool>(s.val[i]);            \
     }                                                     \
     Push(WasmValue(res));                                 \
     return true;                                          \
   }
-        REDUCTION_CASE(S1x4AnyTrue, i32x4, int4, 4, |)
         REDUCTION_CASE(S1x4AllTrue, i32x4, int4, 4, &)
-        REDUCTION_CASE(S1x8AnyTrue, i16x8, int8, 8, |)
         REDUCTION_CASE(S1x8AllTrue, i16x8, int8, 8, &)
-        REDUCTION_CASE(S1x16AnyTrue, i8x16, int16, 16, |)
         REDUCTION_CASE(S1x16AllTrue, i8x16, int16, 16, &)
 #undef REDUCTION_CASE
       default:
@@ -2255,8 +2323,8 @@ class ThreadImpl {
     // stack actually lies in zone memory.
     const size_t stack_size_limit = FLAG_stack_size * KB;
     // Sum up the value stack size and the control stack size.
-    const size_t current_stack_size =
-        (sp_ - stack_.get()) + frames_.size() * sizeof(Frame);
+    const size_t current_stack_size = (sp_ - stack_.get()) * sizeof(*sp_) +
+                                      frames_.size() * sizeof(frames_[0]);
     if (V8_LIKELY(current_stack_size <= stack_size_limit)) {
       return true;
     }
@@ -2301,32 +2369,32 @@ class ThreadImpl {
     // Encode the exception values on the operand stack into the exception
     // package allocated above. This encoding has to be in sync with other
     // backends so that exceptions can be passed between them.
-    const wasm::WasmExceptionSig* sig = exception->sig;
+    const WasmExceptionSig* sig = exception->sig;
     uint32_t encoded_index = 0;
     for (size_t i = 0; i < sig->parameter_count(); ++i) {
       WasmValue value = sp_[i - sig->parameter_count()];
       switch (sig->GetParam(i)) {
-        case wasm::kWasmI32: {
+        case kWasmI32: {
           uint32_t u32 = value.to_u32();
           EncodeI32ExceptionValue(encoded_values, &encoded_index, u32);
           break;
         }
-        case wasm::kWasmF32: {
+        case kWasmF32: {
           uint32_t f32 = value.to_f32_boxed().get_bits();
           EncodeI32ExceptionValue(encoded_values, &encoded_index, f32);
           break;
         }
-        case wasm::kWasmI64: {
+        case kWasmI64: {
           uint64_t u64 = value.to_u64();
           EncodeI64ExceptionValue(encoded_values, &encoded_index, u64);
           break;
         }
-        case wasm::kWasmF64: {
+        case kWasmF64: {
           uint64_t f64 = value.to_f64_boxed().get_bits();
           EncodeI64ExceptionValue(encoded_values, &encoded_index, f64);
           break;
         }
-        case wasm::kWasmAnyRef:
+        case kWasmAnyRef:
           UNIMPLEMENTED();
           break;
         default:
@@ -2608,8 +2676,8 @@ class ThreadImpl {
         } break;
 
         case kExprCallIndirect: {
-          CallIndirectImmediate<Decoder::kNoValidate> imm(&decoder,
-                                                          code->at(pc));
+          CallIndirectImmediate<Decoder::kNoValidate> imm(
+              kAllWasmFeatures, &decoder, code->at(pc));
           uint32_t entry_index = Pop().to<uint32_t>();
           // Assume only one table for now.
           DCHECK_LE(module()->tables.size(), 1u);
@@ -2680,8 +2748,8 @@ class ThreadImpl {
         } break;
 
         case kExprReturnCallIndirect: {
-          CallIndirectImmediate<Decoder::kNoValidate> imm(&decoder,
-                                                          code->at(pc));
+          CallIndirectImmediate<Decoder::kNoValidate> imm(
+              kAllWasmFeatures, &decoder, code->at(pc));
           uint32_t entry_index = Pop().to<uint32_t>();
           // Assume only one table for now.
           DCHECK_LE(module()->tables.size(), 1u);
@@ -3073,6 +3141,14 @@ class ThreadImpl {
         case kWasmF64:
           PrintF("f64:%lf", val.to<double>());
           break;
+        case kWasmS128: {
+          // This defaults to tracing all S128 values as i32x4 values for now,
+          // when there is more state to know what type of values are on the
+          // stack, the right format should be printed here.
+          int4 s = val.to_s128().to_i32x4();
+          PrintF("i32x4:%d %d %d %d", s.val[0], s.val[1], s.val[2], s.val[3]);
+          break;
+        }
         case kWasmStmt:
           PrintF("void");
           break;
@@ -3097,8 +3173,7 @@ class ThreadImpl {
                                               const WasmCode* code,
                                               FunctionSig* sig) {
     int num_args = static_cast<int>(sig->parameter_count());
-    wasm::WasmFeatures enabled_features =
-        wasm::WasmFeaturesFromIsolate(isolate);
+    WasmFeatures enabled_features = WasmFeaturesFromIsolate(isolate);
 
     if (code->kind() == WasmCode::kWasmToJsWrapper &&
         !IsJSCompatibleSignature(sig, enabled_features.bigint)) {
@@ -3248,28 +3323,6 @@ class ThreadImpl {
   ExternalCallResult CallIndirectFunction(uint32_t table_index,
                                           uint32_t entry_index,
                                           uint32_t sig_index) {
-    if (codemap()->call_indirect_through_module()) {
-      // Rely on the information stored in the WasmModule.
-      InterpreterCode* code =
-          codemap()->GetIndirectCode(table_index, entry_index);
-      if (!code) return {ExternalCallResult::INVALID_FUNC};
-      if (code->function->sig_index != sig_index) {
-        // If not an exact match, we have to do a canonical check.
-        int function_canonical_id =
-            module()->signature_ids[code->function->sig_index];
-        int expected_canonical_id = module()->signature_ids[sig_index];
-        DCHECK_EQ(function_canonical_id,
-                  module()->signature_map.Find(*code->function->sig));
-        if (function_canonical_id != expected_canonical_id) {
-          return {ExternalCallResult::SIGNATURE_MISMATCH};
-        }
-      }
-      if (code->function->imported) {
-        return CallImportedFunction(code->function->func_index);
-      }
-      return {ExternalCallResult::INTERNAL, code};
-    }
-
     Isolate* isolate = instance_object_->GetIsolate();
     uint32_t expected_sig_id = module()->signature_ids[sig_index];
     DCHECK_EQ(expected_sig_id,
@@ -3567,10 +3620,6 @@ void WasmInterpreter::SetFunctionCodeForTesting(const WasmFunction* function,
                                                 const byte* start,
                                                 const byte* end) {
   internals_->codemap_.SetFunctionCode(function, start, end);
-}
-
-void WasmInterpreter::SetCallIndirectTestMode() {
-  internals_->codemap_.set_call_indirect_through_module(true);
 }
 
 ControlTransferMap WasmInterpreter::ComputeControlTransfersForTesting(

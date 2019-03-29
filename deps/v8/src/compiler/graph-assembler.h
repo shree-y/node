@@ -92,6 +92,7 @@ namespace compiler {
   V(TrueConstant)                          \
   V(FalseConstant)                         \
   V(NullConstant)                          \
+  V(BigIntMapConstant)                     \
   V(BooleanMapConstant)                    \
   V(HeapNumberMapConstant)                 \
   V(NoContextConstant)                     \
@@ -101,8 +102,8 @@ namespace compiler {
   V(FixedArrayMapConstant)                 \
   V(FixedDoubleArrayMapConstant)           \
   V(ToNumberBuiltinConstant)               \
-  V(AllocateInNewSpaceStubConstant)        \
-  V(AllocateInOldSpaceStubConstant)
+  V(AllocateInYoungGenerationStubConstant) \
+  V(AllocateInOldGenerationStubConstant)
 
 class GraphAssembler;
 
@@ -219,7 +220,7 @@ class GraphAssembler {
   Node* ToNumber(Node* value);
   Node* BitcastWordToTagged(Node* value);
   Node* BitcastTaggedToWord(Node* value);
-  Node* Allocate(PretenureFlag pretenure, Node* size);
+  Node* Allocate(AllocationType allocation, Node* size);
   Node* LoadField(FieldAccess const&, Node* object);
   Node* LoadElement(ElementAccess const&, Node* object, Node* index);
   Node* StoreField(FieldAccess const&, Node* object, Node* value);

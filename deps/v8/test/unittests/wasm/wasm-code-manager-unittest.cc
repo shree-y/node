@@ -159,7 +159,7 @@ class WasmCodeManagerTest : public TestWithContext,
   static constexpr uint32_t kJumpTableSize = RoundUp<kCodeAlignment>(
       JumpTableAssembler::SizeForNumberOfSlots(kNumFunctions));
 
-  using NativeModulePtr = std::unique_ptr<NativeModule>;
+  using NativeModulePtr = std::shared_ptr<NativeModule>;
 
   NativeModulePtr AllocModule(size_t size, ModuleStyle style) {
     std::shared_ptr<WasmModule> module(new WasmModule);
@@ -175,8 +175,9 @@ class WasmCodeManagerTest : public TestWithContext,
     std::unique_ptr<byte[]> exec_buff(new byte[size]);
     desc.buffer = exec_buff.get();
     desc.instr_size = static_cast<int>(size);
-    return native_module->AddCode(index, desc, 0, 0, {}, OwnedVector<byte>(),
-                                  WasmCode::kFunction, WasmCode::kOther);
+    std::unique_ptr<WasmCode> code = native_module->AddCode(
+        index, desc, 0, 0, {}, {}, WasmCode::kFunction, WasmCode::kOther);
+    return native_module->PublishCode(std::move(code));
   }
 
   size_t page() const { return AllocatePageSize(); }

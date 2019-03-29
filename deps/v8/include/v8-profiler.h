@@ -48,7 +48,7 @@ template class V8_EXPORT std::vector<v8::CpuProfileDeoptInfo>;
 namespace v8 {
 
 // TickSample captures the information collected for each sample.
-struct TickSample {
+struct V8_EXPORT TickSample {
   // Internal profiling (with --prof + tools/$OS-tick-processor) wants to
   // include the runtime function we're calling. Externally exposed tick
   // samples don't care.
@@ -153,6 +153,12 @@ class V8_EXPORT CpuProfileNode {
   const char* GetScriptResourceNameStr() const;
 
   /**
+   * Return true if the script from where the function originates is flagged as
+   * being shared cross-origin.
+   */
+  bool IsScriptSharedCrossOrigin() const;
+
+  /**
    * Returns the number, 1-based, of the line where the function originates.
    * kNoLineNumberInfo if no line number information is available.
    */
@@ -199,6 +205,9 @@ class V8_EXPORT CpuProfileNode {
 
   /** Retrieves a child node by index. */
   const CpuProfileNode* GetChild(int index) const;
+
+  /** Retrieves the ancestor node, or null if the root. */
+  const CpuProfileNode* GetParent() const;
 
   /** Retrieves deopt infos for the node. */
   const std::vector<CpuProfileDeoptInfo>& GetDeoptInfos() const;

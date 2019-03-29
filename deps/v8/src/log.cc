@@ -1590,7 +1590,7 @@ void Logger::RuntimeCallTimerEvent() {
 
 void Logger::TickEvent(v8::TickSample* sample, bool overflow) {
   if (!log_->IsEnabled() || !FLAG_prof_cpp) return;
-  if (V8_UNLIKELY(FLAG_runtime_stats ==
+  if (V8_UNLIKELY(TracingFlags::runtime_stats.load(std::memory_order_relaxed) ==
                   v8::tracing::TracingCategoryObserver::ENABLED_BY_NATIVE)) {
     RuntimeCallTimerEvent();
   }
@@ -1930,7 +1930,9 @@ void Logger::SetCodeEventHandler(uint32_t options,
   }
 
   if (event_handler) {
-    isolate_->wasm_engine()->EnableCodeLogging(isolate_);
+    if (isolate_->wasm_engine() != nullptr) {
+      isolate_->wasm_engine()->EnableCodeLogging(isolate_);
+    }
     jit_logger_.reset(new JitLogger(isolate_, event_handler));
     AddCodeEventListener(jit_logger_.get());
     if (options & kJitCodeEventEnumExisting) {
@@ -2059,6 +2061,7 @@ void ExistingCodeLogger::LogCompiledFunctions() {
   // During iteration, there can be heap allocation due to
   // GetScriptLineNumber call.
   for (int i = 0; i < compiled_funcs_count; ++i) {
+    SharedFunctionInfo::EnsureSourcePositionsAvailable(isolate_, sfis[i]);
     if (sfis[i]->function_data()->IsInterpreterData()) {
       LogExistingFunction(
           sfis[i],

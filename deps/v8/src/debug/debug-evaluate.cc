@@ -300,8 +300,8 @@ bool IntrinsicHasNoSideEffect(Runtime::FunctionId id) {
   V(CreateObjectLiteralWithoutAllocationSite) \
   V(CreateRegExpLiteral)                      \
   /* Called from builtins */                  \
-  V(AllocateInNewSpace)                       \
-  V(AllocateInTargetSpace)                    \
+  V(AllocateInYoungGeneration)                \
+  V(AllocateInOldGeneration)                  \
   V(AllocateSeqOneByteString)                 \
   V(AllocateSeqTwoByteString)                 \
   V(ArrayIncludes_Slow)                       \
@@ -625,7 +625,7 @@ DebugInfo::SideEffectState BuiltinGetSideEffectState(Builtins::Name id) {
     // WeakMap builtins.
     case Builtins::kWeakMapConstructor:
     case Builtins::kWeakMapGet:
-    case Builtins::kWeakMapHas:
+    case Builtins::kWeakMapPrototypeHas:
     // Math builtins.
     case Builtins::kMathAbs:
     case Builtins::kMathAcos:
@@ -690,7 +690,7 @@ DebugInfo::SideEffectState BuiltinGetSideEffectState(Builtins::Name id) {
     case Builtins::kSetPrototypeValues:
     // WeakSet builtins.
     case Builtins::kWeakSetConstructor:
-    case Builtins::kWeakSetHas:
+    case Builtins::kWeakSetPrototypeHas:
     // String builtins. Strings are immutable.
     case Builtins::kStringFromCharCode:
     case Builtins::kStringFromCodePoint:
@@ -770,8 +770,8 @@ DebugInfo::SideEffectState BuiltinGetSideEffectState(Builtins::Name id) {
     case Builtins::kRegExpConstructor:
     // Internal.
     case Builtins::kStrictPoisonPillThrower:
-    case Builtins::kAllocateInNewSpace:
-    case Builtins::kAllocateInOldSpace:
+    case Builtins::kAllocateInYoungGeneration:
+    case Builtins::kAllocateInOldGeneration:
       return DebugInfo::kHasNoSideEffect;
 
     // Set builtins.
@@ -949,6 +949,7 @@ static bool TransitivelyCalledBuiltinHasNoSideEffect(Builtins::Name caller,
     case Builtins::kFlattenIntoArray:
     case Builtins::kGetProperty:
     case Builtins::kHasProperty:
+    case Builtins::kCreateHTML:
     case Builtins::kNonNumberToNumber:
     case Builtins::kNonPrimitiveToPrimitive_Number:
     case Builtins::kNumberToString:

@@ -446,7 +446,7 @@ void Parser::DeserializeScopeChain(
   InitializeEmptyScopeChain(info);
   Handle<ScopeInfo> outer_scope_info;
   if (maybe_outer_scope_info.ToHandle(&outer_scope_info)) {
-    DCHECK(ThreadId::Current().Equals(isolate->thread_id()));
+    DCHECK_EQ(ThreadId::Current(), isolate->thread_id());
     original_scope_ = Scope::DeserializeScopeChain(
         isolate, zone(), *outer_scope_info, info->script_scope(),
         ast_value_factory(), mode);
@@ -500,7 +500,7 @@ FunctionLiteral* Parser::ParseProgram(Isolate* isolate, ParseInfo* info) {
                         Scope::DeserializationMode::kIncludingVariables);
 
   scanner_.Initialize();
-  if (FLAG_harmony_hashbang && !info->is_eval()) {
+  if (FLAG_harmony_hashbang) {
     scanner_.SkipHashBang();
   }
   FunctionLiteral* result = DoParseProgram(isolate, info);
@@ -2416,7 +2416,8 @@ FunctionLiteral* Parser::ParseFunctionLiteral(
         reinterpret_cast<const char*>(function_name->raw_data()),
         function_name->byte_length());
   }
-  if (V8_UNLIKELY(FLAG_runtime_stats) && did_preparse_successfully) {
+  if (V8_UNLIKELY(TracingFlags::is_runtime_stats_enabled()) &&
+      did_preparse_successfully) {
     const RuntimeCallCounterId counters[2] = {
         RuntimeCallCounterId::kPreParseBackgroundWithVariableResolution,
         RuntimeCallCounterId::kPreParseWithVariableResolution};

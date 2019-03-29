@@ -846,18 +846,8 @@ class JSAccessorPropertyDescriptor : public JSObject {
 // FromPropertyDescriptor function for regular data properties.
 class JSDataPropertyDescriptor : public JSObject {
  public:
-  // Layout description.
-#define JS_DATA_PROPERTY_DESCRIPTOR_FIELDS(V) \
-  V(kValueOffset, kTaggedSize)                \
-  V(kWritableOffset, kTaggedSize)             \
-  V(kEnumerableOffset, kTaggedSize)           \
-  V(kConfigurableOffset, kTaggedSize)         \
-  /* Total size. */                           \
-  V(kSize, 0)
-
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
-                                JS_DATA_PROPERTY_DESCRIPTOR_FIELDS)
-#undef JS_DATA_PROPERTY_DESCRIPTOR_FIELDS
+  DEFINE_FIELD_OFFSET_CONSTANTS(
+      JSObject::kHeaderSize, TORQUE_GENERATED_JSDATA_PROPERTY_DESCRIPTOR_FIELDS)
 
   // Indices of in-object properties.
   static const int kValueIndex = 0;
@@ -1034,10 +1024,26 @@ class JSFunction : public JSObject {
   // the JSFunction's bytecode being flushed.
   DECL_ACCESSORS(raw_feedback_cell, FeedbackCell)
 
-  // feedback_vector() can be used once the function is compiled.
+  // Functions related to feedback vector. feedback_vector() can be used once
+  // the function has feedback vectors allocated. feedback vectors may not be
+  // available after compile when lazily allocating feedback vectors.
   inline FeedbackVector feedback_vector() const;
   inline bool has_feedback_vector() const;
   static void EnsureFeedbackVector(Handle<JSFunction> function);
+
+  // Functions related to clousre feedback cell array that holds feedback cells
+  // used to create closures from this function. We allocate closure feedback
+  // cell arrays after compile, when we want to allocate feedback vectors
+  // lazily.
+  inline bool has_closure_feedback_cell_array() const;
+  inline ClosureFeedbackCellArray closure_feedback_cell_array() const;
+  static void EnsureClosureFeedbackCellArray(Handle<JSFunction> function);
+
+  // Initializes the feedback cell of |function|. In lite mode, this would be
+  // initialized to the closure feedback cell array that holds the feedback
+  // cells for create closure calls from this function. In the regular mode,
+  // this allocates feedback vector.
+  static void InitializeFeedbackCell(Handle<JSFunction> function);
 
   // Unconditionally clear the type feedback vector.
   void ClearTypeFeedbackInfo();
@@ -1169,7 +1175,7 @@ class JSGlobalObject : public JSObject {
   DECL_ACCESSORS(native_context, NativeContext)
 
   // [global proxy]: the global proxy object of the context
-  DECL_ACCESSORS(global_proxy, JSObject)
+  DECL_ACCESSORS(global_proxy, JSGlobalProxy)
 
   // Gets global object properties.
   inline GlobalDictionary global_dictionary();
@@ -1303,22 +1309,8 @@ class JSDate : public JSObject {
     kTimezoneOffset
   };
 
-  // Layout description.
-#define JS_DATE_FIELDS(V)           \
-  V(kValueOffset, kTaggedSize)      \
-  V(kYearOffset, kTaggedSize)       \
-  V(kMonthOffset, kTaggedSize)      \
-  V(kDayOffset, kTaggedSize)        \
-  V(kWeekdayOffset, kTaggedSize)    \
-  V(kHourOffset, kTaggedSize)       \
-  V(kMinOffset, kTaggedSize)        \
-  V(kSecOffset, kTaggedSize)        \
-  V(kCacheStampOffset, kTaggedSize) \
-  /* Header size. */                \
-  V(kSize, 0)
-
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize, JS_DATE_FIELDS)
-#undef JS_DATE_FIELDS
+  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
+                                TORQUE_GENERATED_JSDATE_FIELDS)
 
  private:
   inline Object DoGetField(FieldIndex index);
@@ -1380,24 +1372,10 @@ class JSMessageObject : public JSObject {
   DECL_PRINTER(JSMessageObject)
   DECL_VERIFIER(JSMessageObject)
 
-  // Layout description.
-#define JS_MESSAGE_FIELDS(V)                         \
-  /* Tagged fields. */                               \
-  V(kTypeOffset, kTaggedSize)                        \
-  V(kArgumentsOffset, kTaggedSize)                   \
-  V(kScriptOffset, kTaggedSize)                      \
-  V(kStackFramesOffset, kTaggedSize)                 \
-  V(kPointerFieldsEndOffset, 0)                      \
-  /* Raw data fields. */                             \
-  /* TODO(ishell): store as int32 instead of Smi. */ \
-  V(kStartPositionOffset, kTaggedSize)               \
-  V(kEndPositionOffset, kTaggedSize)                 \
-  V(kErrorLevelOffset, kTaggedSize)                  \
-  /* Total size. */                                  \
-  V(kSize, 0)
-
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize, JS_MESSAGE_FIELDS)
-#undef JS_MESSAGE_FIELDS
+  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
+                                TORQUE_GENERATED_JSMESSAGE_OBJECT_FIELDS)
+  // TODO(v8:8989): [torque] Support marker constants.
+  static const int kPointerFieldsEndOffset = kStartPositionOffset;
 
   typedef FixedBodyDescriptor<HeapObject::kMapOffset, kPointerFieldsEndOffset,
                               kSize>
@@ -1428,16 +1406,8 @@ class JSAsyncFromSyncIterator : public JSObject {
   // subsequent "next" invocations.
   DECL_ACCESSORS(next, Object)
 
-  // Layout description.
-#define JS_ASYNC_FROM_SYNC_ITERATOR_FIELDS(V) \
-  V(kSyncIteratorOffset, kTaggedSize)         \
-  V(kNextOffset, kTaggedSize)                 \
-  /* Total size. */                           \
-  V(kSize, 0)
-
-  DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
-                                JS_ASYNC_FROM_SYNC_ITERATOR_FIELDS)
-#undef JS_ASYNC_FROM_SYNC_ITERATOR_FIELDS
+  DEFINE_FIELD_OFFSET_CONSTANTS(
+      JSObject::kHeaderSize, TORQUE_GENERATED_JSASYNC_FROM_SYNC_ITERATOR_FIELDS)
 
   OBJECT_CONSTRUCTORS(JSAsyncFromSyncIterator, JSObject);
 };
@@ -1457,16 +1427,8 @@ class JSStringIterator : public JSObject {
   inline int index() const;
   inline void set_index(int value);
 
-  // Layout description.
-#define JS_STRING_ITERATOR_FIELDS(V) \
-  V(kStringOffset, kTaggedSize)      \
-  V(kNextIndexOffset, kTaggedSize)   \
-  /* Total size. */                  \
-  V(kSize, 0)
-
   DEFINE_FIELD_OFFSET_CONSTANTS(JSObject::kHeaderSize,
-                                JS_STRING_ITERATOR_FIELDS)
-#undef JS_STRING_ITERATOR_FIELDS
+                                TORQUE_GENERATED_JSSTRING_ITERATOR_FIELDS)
 
   OBJECT_CONSTRUCTORS(JSStringIterator, JSObject);
 };

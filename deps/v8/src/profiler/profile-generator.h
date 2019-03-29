@@ -16,6 +16,7 @@
 
 #include "include/v8-profiler.h"
 #include "src/allocation.h"
+#include "src/base/platform/time.h"
 #include "src/builtins/builtins.h"
 #include "src/code-events.h"
 #include "src/profiler/strings-storage.h"
@@ -28,7 +29,7 @@ struct TickSample;
 
 // Provides a mapping from the offsets within generated code or a bytecode array
 // to the source line and inlining id.
-class SourcePositionTable : public Malloced {
+class V8_EXPORT_PRIVATE SourcePositionTable : public Malloced {
  public:
   SourcePositionTable() = default;
 
@@ -64,7 +65,8 @@ class CodeEntry {
                    int line_number = v8::CpuProfileNode::kNoLineNumberInfo,
                    int column_number = v8::CpuProfileNode::kNoColumnNumberInfo,
                    std::unique_ptr<SourcePositionTable> line_info = nullptr,
-                   Address instruction_start = kNullAddress);
+                   Address instruction_start = kNullAddress,
+                   bool is_shared_cross_origin = false);
 
   const char* name() const { return name_; }
   const char* resource_name() const { return resource_name_; }
@@ -105,6 +107,10 @@ class CodeEntry {
     return BuiltinIdField::decode(bit_field_);
   }
 
+  bool is_shared_cross_origin() const {
+    return SharedCrossOriginField::decode(bit_field_);
+  }
+
   uint32_t GetHash() const;
   bool IsSameFunctionAs(const CodeEntry* entry) const;
 
@@ -138,16 +144,16 @@ class CodeEntry {
   }
 
   static const char* const kWasmResourceNamePrefix;
-  static const char* const kEmptyResourceName;
+  V8_EXPORT_PRIVATE static const char* const kEmptyResourceName;
   static const char* const kEmptyBailoutReason;
   static const char* const kNoDeoptReason;
 
-  static const char* const kProgramEntryName;
-  static const char* const kIdleEntryName;
+  V8_EXPORT_PRIVATE static const char* const kProgramEntryName;
+  V8_EXPORT_PRIVATE static const char* const kIdleEntryName;
   static const char* const kGarbageCollectorEntryName;
   // Used to represent frames for which we have no reliable way to
   // detect function.
-  static const char* const kUnresolvedFunctionName;
+  V8_EXPORT_PRIVATE static const char* const kUnresolvedFunctionName;
 
   V8_INLINE static CodeEntry* program_entry() {
     return kProgramEntry.Pointer();
@@ -196,8 +202,11 @@ class CodeEntry {
       kUnresolvedEntry;
 
   using TagField = BitField<CodeEventListener::LogEventsAndTags, 0, 8>;
-  using BuiltinIdField = BitField<Builtins::Name, 8, 23>;
-  using UsedField = BitField<bool, 31, 1>;
+  using BuiltinIdField = BitField<Builtins::Name, 8, 22>;
+  static_assert(Builtins::builtin_count <= BuiltinIdField::kNumValues,
+                "builtin_count exceeds size of bitfield");
+  using UsedField = BitField<bool, 30, 1>;
+  using SharedCrossOriginField = BitField<bool, 31, 1>;
 
   uint32_t bit_field_;
   const char* name_;
@@ -222,7 +231,7 @@ typedef std::vector<CodeEntryAndLineNumber> ProfileStackTrace;
 
 class ProfileTree;
 
-class ProfileNode {
+class V8_EXPORT_PRIVATE ProfileNode {
  public:
   inline ProfileNode(ProfileTree* tree, CodeEntry* entry, ProfileNode* parent,
                      int line_number = 0);
@@ -289,7 +298,7 @@ class ProfileNode {
   DISALLOW_COPY_AND_ASSIGN(ProfileNode);
 };
 
-class ProfileTree {
+class V8_EXPORT_PRIVATE ProfileTree {
  public:
   explicit ProfileTree(Isolate* isolate);
   ~ProfileTree();
@@ -370,7 +379,7 @@ class CpuProfile {
 
   void UpdateTicksScale();
 
-  void Print();
+  V8_EXPORT_PRIVATE void Print();
 
  private:
   void StreamPendingTraceEvents();
@@ -391,7 +400,7 @@ class CpuProfile {
   DISALLOW_COPY_AND_ASSIGN(CpuProfile);
 };
 
-class CodeMap {
+class V8_EXPORT_PRIVATE CodeMap {
  public:
   CodeMap();
   ~CodeMap();
@@ -427,7 +436,7 @@ class CodeMap {
   DISALLOW_COPY_AND_ASSIGN(CodeMap);
 };
 
-class CpuProfilesCollection {
+class V8_EXPORT_PRIVATE CpuProfilesCollection {
  public:
   explicit CpuProfilesCollection(Isolate* isolate);
 
@@ -464,7 +473,7 @@ class CpuProfilesCollection {
   DISALLOW_COPY_AND_ASSIGN(CpuProfilesCollection);
 };
 
-class ProfileGenerator {
+class V8_EXPORT_PRIVATE ProfileGenerator {
  public:
   explicit ProfileGenerator(CpuProfilesCollection* profiles);
 

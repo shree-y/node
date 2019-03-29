@@ -348,9 +348,12 @@ void DeclarationVisitor::Visit(TypeDeclaration* decl) {
         MakeNode<Identifier>(CONSTEXPR_TYPE_PREFIX + decl->name->value);
     constexpr_name->pos = decl->name->pos;
 
-    base::Optional<std::string> constexpr_extends;
-    if (decl->extends)
-      constexpr_extends = CONSTEXPR_TYPE_PREFIX + *decl->extends;
+    base::Optional<Identifier*> constexpr_extends;
+    if (decl->extends) {
+      constexpr_extends =
+          MakeNode<Identifier>(CONSTEXPR_TYPE_PREFIX + (*decl->extends)->value);
+      (*constexpr_extends)->pos = (*decl->extends)->pos;
+    }
     Declarations::DeclareAbstractType(constexpr_name, false,
                                       *decl->constexpr_generates, type,
                                       constexpr_extends);
@@ -462,7 +465,7 @@ void DeclarationVisitor::FinalizeStructFieldsAndMethods(
   size_t offset = 0;
   for (auto& field : struct_declaration->fields) {
     const Type* field_type = Declarations::GetType(field.name_and_type.type);
-    struct_type->RegisterField({field.name_and_type.type->pos,
+    struct_type->RegisterField({field.name_and_type.name->pos,
                                 struct_type,
                                 base::nullopt,
                                 {field.name_and_type.name->value, field_type},
@@ -502,7 +505,7 @@ void DeclarationVisitor::FinalizeClassFieldsAndMethods(
       const Field* index_field =
           &(class_type->LookupField(*field_expression.index));
       class_type->RegisterField(
-          {field_expression.name_and_type.type->pos,
+          {field_expression.name_and_type.name->pos,
            class_type,
            index_field,
            {field_expression.name_and_type.name->value, field_type},
@@ -516,7 +519,7 @@ void DeclarationVisitor::FinalizeClassFieldsAndMethods(
                     "declaration");
       }
       const Field& field = class_type->RegisterField(
-          {field_expression.name_and_type.type->pos,
+          {field_expression.name_and_type.name->pos,
            class_type,
            base::nullopt,
            {field_expression.name_and_type.name->value, field_type},

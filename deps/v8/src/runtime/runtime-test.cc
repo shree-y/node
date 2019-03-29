@@ -58,6 +58,9 @@ bool IsWasmCompileAllowed(v8::Isolate* isolate, v8::Local<v8::Value> value,
   return (is_async && ctrls.AllowAnySizeForAsync) ||
          (value->IsArrayBuffer() &&
           v8::Local<v8::ArrayBuffer>::Cast(value)->ByteLength() <=
+              ctrls.MaxWasmBufferSize) ||
+         (value->IsArrayBufferView() &&
+          v8::Local<v8::ArrayBufferView>::Cast(value)->ByteLength() <=
               ctrls.MaxWasmBufferSize);
 }
 
@@ -296,6 +299,39 @@ RUNTIME_FUNCTION(Runtime_OptimizeFunctionOnNextCall) {
   return ReadOnlyRoots(isolate).undefined_value();
 }
 
+namespace {
+
+bool EnsureFeedbackVector(Handle<JSFunction> function) {
+  // Check function allows lazy compilation.
+  if (!function->shared()->allows_lazy_compilation()) {
+    return false;
+  }
+
+  // If function isn't compiled, compile it now.
+  IsCompiledScope is_compiled_scope(function->shared()->is_compiled_scope());
+  if (!is_compiled_scope.is_compiled() &&
+      !Compiler::Compile(function, Compiler::CLEAR_EXCEPTION,
+                         &is_compiled_scope)) {
+    return false;
+  }
+
+  // Ensure function has a feedback vector to hold type feedback for
+  // optimization.
+  JSFunction::EnsureFeedbackVector(function);
+  return true;
+}
+
+}  // namespace
+
+RUNTIME_FUNCTION(Runtime_EnsureFeedbackVectorForFunction) {
+  HandleScope scope(isolate);
+  DCHECK_EQ(1, args.length());
+  CONVERT_ARG_HANDLE_CHECKED(JSFunction, function, 0);
+
+  EnsureFeedbackVector(function);
+  return ReadOnlyRoots(isolate).undefined_value();
+}
+
 RUNTIME_FUNCTION(Runtime_PrepareFunctionForOptimization) {
   HandleScope scope(isolate);
   DCHECK_EQ(1, args.length());
@@ -304,22 +340,9 @@ RUNTIME_FUNCTION(Runtime_PrepareFunctionForOptimization) {
   // Only one function should be prepared for optimization at a time
   CHECK(isolate->heap()->pending_optimize_for_test_bytecode()->IsUndefined());
 
-  // Check function allows lazy compilation.
-  if (!function->shared()->allows_lazy_compilation()) {
+  if (!EnsureFeedbackVector(function)) {
     return ReadOnlyRoots(isolate).undefined_value();
   }
-
-  // If function isn't compiled, compile it now.
-  IsCompiledScope is_compiled_scope(function->shared()->is_compiled_scope());
-  if (!is_compiled_scope.is_compiled() &&
-      !Compiler::Compile(function, Compiler::CLEAR_EXCEPTION,
-                         &is_compiled_scope)) {
-    return ReadOnlyRoots(isolate).undefined_value();
-  }
-
-  // Ensure function has a feedback vector to hold type feedback for
-  // optimization.
-  JSFunction::EnsureFeedbackVector(function);
 
   // If optimization is disabled for the function, return without making it
   // pending optimize for test.
@@ -414,7 +437,9 @@ RUNTIME_FUNCTION(Runtime_GetOptimizationStatus) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 1 || args.length() == 2);
   int status = 0;
-  if (FLAG_lite_mode) {
+  if (FLAG_lite_mode || FLAG_jitless) {
+    // Both jitless and lite modes cannot optimize. Unit tests should handle
+    // these the same way. In the future, the two flags may become synonyms.
     status |= static_cast<int>(OptimizationStatus::kLiteMode);
   }
   if (!isolate->use_optimizer()) {
@@ -1061,17 +1086,23 @@ RUNTIME_FUNCTION(Runtime_DeserializeWasmModule) {
   HandleScope scope(isolate);
   DCHECK_EQ(2, args.length());
   CONVERT_ARG_HANDLE_CHECKED(JSArrayBuffer, buffer, 0);
-  CONVERT_ARG_HANDLE_CHECKED(JSArrayBuffer, wire_bytes, 1);
+  CONVERT_ARG_HANDLE_CHECKED(JSTypedArray, wire_bytes, 1);
+  CHECK(!buffer->was_detached());
+  CHECK(!wire_bytes->WasDetached());
+
+  Handle<JSArrayBuffer> wire_bytes_buffer = wire_bytes->GetBuffer();
+  Vector<const uint8_t> wire_bytes_vec{
+      reinterpret_cast<const uint8_t*>(wire_bytes_buffer->backing_store()) +
+          wire_bytes->byte_offset(),
+      wire_bytes->byte_length()};
+  Vector<uint8_t> buffer_vec{
+      reinterpret_cast<uint8_t*>(buffer->backing_store()),
+      buffer->byte_length()};
 
   // Note that {wasm::DeserializeNativeModule} will allocate. We assume the
   // JSArrayBuffer backing store doesn't get relocated.
   MaybeHandle<WasmModuleObject> maybe_module_object =
-      wasm::DeserializeNativeModule(
-          isolate,
-          {reinterpret_cast<uint8_t*>(buffer->backing_store()),
-           buffer->byte_length()},
-          {reinterpret_cast<uint8_t*>(wire_bytes->backing_store()),
-           wire_bytes->byte_length()});
+      wasm::DeserializeNativeModule(isolate, buffer_vec, wire_bytes_vec);
   Handle<WasmModuleObject> module_object;
   if (!maybe_module_object.ToHandle(&module_object)) {
     return ReadOnlyRoots(isolate).undefined_value();

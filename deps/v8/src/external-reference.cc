@@ -15,6 +15,7 @@
 #include "src/elements.h"
 #include "src/hash-seed-inl.h"
 #include "src/heap/heap.h"
+#include "src/objects/ordered-hash-table.h"
 // For IncrementalMarking::RecordWriteFromCode. TODO(jkummerow): Drop.
 #include "src/heap/heap-inl.h"
 #include "src/ic/stub-cache.h"
@@ -426,7 +427,7 @@ ExternalReference::address_of_mock_arraybuffer_allocator_flag() {
 }
 
 ExternalReference ExternalReference::address_of_runtime_stats_flag() {
-  return ExternalReference(&FLAG_runtime_stats);
+  return ExternalReference(&TracingFlags::runtime_stats);
 }
 
 ExternalReference ExternalReference::address_of_one_half() {

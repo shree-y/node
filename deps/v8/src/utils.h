@@ -74,6 +74,21 @@ inline constexpr bool IsInBounds(size_t index, size_t length, size_t max) {
   return length <= max && index <= (max - length);
 }
 
+// Checks if [index, index+length) is in range [0, max). If not, {length} is
+// clamped to its valid range. Note that this check works even if
+// {index+length} would wrap around.
+template <typename T>
+inline bool ClampToBounds(T index, T* length, T max) {
+  if (index > max) {
+    *length = 0;
+    return false;
+  }
+  T avail = max - index;
+  bool oob = *length > avail;
+  if (oob) *length = avail;
+  return !oob;
+}
+
 // X must be a power of 2.  Returns the number of trailing zeros.
 template <typename T,
           typename = typename std::enable_if<std::is_integral<T>::value>::type>
@@ -444,6 +459,9 @@ class BitSetComputer {
 // Size of the field defined by DEFINE_FIELD_OFFSET_CONSTANTS
 #define FIELD_SIZE(Name) (Name##End + 1 - Name)
 
+// Compare two offsets with static cast
+#define STATIC_ASSERT_FIELD_OFFSETS_EQUAL(Offset1, Offset2) \
+  STATIC_ASSERT(static_cast<int>(Offset1) == Offset2)
 // ----------------------------------------------------------------------------
 // Hash function.
 

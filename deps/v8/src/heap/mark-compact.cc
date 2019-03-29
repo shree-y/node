@@ -1547,7 +1547,7 @@ bool MarkCompactCollector::ProcessEphemerons() {
   // Drain current_ephemerons and push ephemerons where key and value are still
   // unreachable into next_ephemerons.
   while (weak_objects_.current_ephemerons.Pop(kMainThread, &ephemeron)) {
-    if (VisitEphemeron(ephemeron.key, ephemeron.value)) {
+    if (ProcessEphemeron(ephemeron.key, ephemeron.value)) {
       ephemeron_marked = true;
     }
   }
@@ -1560,7 +1560,7 @@ bool MarkCompactCollector::ProcessEphemerons() {
   // before) and push ephemerons where key and value are still unreachable into
   // next_ephemerons.
   while (weak_objects_.discovered_ephemerons.Pop(kMainThread, &ephemeron)) {
-    if (VisitEphemeron(ephemeron.key, ephemeron.value)) {
+    if (ProcessEphemeron(ephemeron.key, ephemeron.value)) {
       ephemeron_marked = true;
     }
   }
@@ -1583,7 +1583,7 @@ void MarkCompactCollector::ProcessEphemeronsLinear() {
   weak_objects_.current_ephemerons.Swap(weak_objects_.next_ephemerons);
 
   while (weak_objects_.current_ephemerons.Pop(kMainThread, &ephemeron)) {
-    VisitEphemeron(ephemeron.key, ephemeron.value);
+    ProcessEphemeron(ephemeron.key, ephemeron.value);
 
     if (non_atomic_marking_state()->IsWhite(ephemeron.value)) {
       key_to_values.insert(std::make_pair(ephemeron.key, ephemeron.value));
@@ -1610,7 +1610,7 @@ void MarkCompactCollector::ProcessEphemeronsLinear() {
     }
 
     while (weak_objects_.discovered_ephemerons.Pop(kMainThread, &ephemeron)) {
-      VisitEphemeron(ephemeron.key, ephemeron.value);
+      ProcessEphemeron(ephemeron.key, ephemeron.value);
 
       if (non_atomic_marking_state()->IsWhite(ephemeron.value)) {
         key_to_values.insert(std::make_pair(ephemeron.key, ephemeron.value));
@@ -1696,7 +1696,7 @@ void MarkCompactCollector::ProcessMarkingWorklistInternal() {
   }
 }
 
-bool MarkCompactCollector::VisitEphemeron(HeapObject key, HeapObject value) {
+bool MarkCompactCollector::ProcessEphemeron(HeapObject key, HeapObject value) {
   if (marking_state()->IsBlackOrGrey(key)) {
     if (marking_state()->WhiteToGrey(value)) {
       marking_worklist()->Push(value);
@@ -1740,12 +1740,12 @@ void MarkCompactCollector::ProcessTopOptimizedFrame(ObjectVisitor* visitor) {
 }
 
 void MarkCompactCollector::RecordObjectStats() {
-  if (V8_UNLIKELY(FLAG_gc_stats)) {
+  if (V8_UNLIKELY(TracingFlags::is_gc_stats_enabled())) {
     heap()->CreateObjectStats();
     ObjectStatsCollector collector(heap(), heap()->live_object_stats_.get(),
                                    heap()->dead_object_stats_.get());
     collector.Collect();
-    if (V8_UNLIKELY(FLAG_gc_stats &
+    if (V8_UNLIKELY(TracingFlags::gc_stats.load(std::memory_order_relaxed) &
                     v8::tracing::TracingCategoryObserver::ENABLED_BY_TRACING)) {
       std::stringstream live, dead;
       heap()->live_object_stats_->Dump(live);
@@ -2075,8 +2075,8 @@ void MarkCompactCollector::ClearOldBytecodeCandidates() {
 
     // Now record the slot, which has either been updated to an uncompiled data,
     // or is the BytecodeArray which is still alive.
-    ObjectSlot slot = HeapObject::RawField(
-        flushing_candidate, SharedFunctionInfo::kFunctionDataOffset);
+    ObjectSlot slot =
+        flushing_candidate.RawField(SharedFunctionInfo::kFunctionDataOffset);
     RecordSlot(flushing_candidate, slot, HeapObject::cast(*slot));
   }
 }
@@ -2292,8 +2292,7 @@ void MarkCompactCollector::ClearJSWeakRefs() {
       weak_ref->set_target(ReadOnlyRoots(isolate()).undefined_value());
     } else {
       // The value of the JSWeakRef is alive.
-      ObjectSlot slot =
-          HeapObject::RawField(weak_ref, JSWeakRef::kTargetOffset);
+      ObjectSlot slot = weak_ref.RawField(JSWeakRef::kTargetOffset);
       RecordSlot(weak_ref, slot, target);
     }
   }
@@ -2327,8 +2326,7 @@ void MarkCompactCollector::ClearJSWeakRefs() {
       DCHECK(finalization_group->scheduled_for_cleanup());
     } else {
       // The value of the WeakCell is alive.
-      ObjectSlot slot =
-          HeapObject::RawField(weak_cell, WeakCell::kTargetOffset);
+      ObjectSlot slot = weak_cell.RawField(WeakCell::kTargetOffset);
       RecordSlot(weak_cell, slot, HeapObject::cast(*slot));
     }
   }

@@ -6,7 +6,7 @@
 #include "src/wasm/function-compiler.h"
 #include "src/wasm/wasm-code-manager.h"
 #include "src/wasm/wasm-engine.h"
-#include "src/wasm/wasm-import-wrapper-cache-inl.h"
+#include "src/wasm/wasm-import-wrapper-cache.h"
 #include "src/wasm/wasm-module.h"
 
 #include "test/cctest/cctest.h"
@@ -17,7 +17,7 @@ namespace internal {
 namespace wasm {
 namespace test_wasm_import_wrapper_cache {
 
-std::unique_ptr<NativeModule> NewModule(Isolate* isolate) {
+std::shared_ptr<NativeModule> NewModule(Isolate* isolate) {
   std::shared_ptr<WasmModule> module(new WasmModule);
   bool can_request_more = false;
   size_t size = 16384;

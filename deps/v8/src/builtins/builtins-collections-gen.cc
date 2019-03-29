@@ -12,6 +12,7 @@
 #include "src/heap/heap-inl.h"
 #include "src/objects/hash-table-inl.h"
 #include "src/objects/js-collection.h"
+#include "src/objects/ordered-hash-table.h"
 #include "torque-generated/builtins-base-from-dsl-gen.h"
 #include "torque-generated/builtins-collections-from-dsl-gen.h"
 
@@ -2611,7 +2612,7 @@ TF_BUILTIN(WeakMapGet, WeakCollectionsBuiltinsAssembler) {
   Return(UndefinedConstant());
 }
 
-TF_BUILTIN(WeakMapHas, WeakCollectionsBuiltinsAssembler) {
+TF_BUILTIN(WeakMapPrototypeHas, WeakCollectionsBuiltinsAssembler) {
   Node* const receiver = Parameter(Descriptor::kReceiver);
   Node* const key = Parameter(Descriptor::kKey);
   Node* const context = Parameter(Descriptor::kContext);
@@ -2775,7 +2776,7 @@ TF_BUILTIN(WeakSetPrototypeDelete, CodeStubAssembler) {
       CallBuiltin(Builtins::kWeakCollectionDelete, context, receiver, value));
 }
 
-TF_BUILTIN(WeakSetHas, WeakCollectionsBuiltinsAssembler) {
+TF_BUILTIN(WeakSetPrototypeHas, WeakCollectionsBuiltinsAssembler) {
   Node* const receiver = Parameter(Descriptor::kReceiver);
   Node* const key = Parameter(Descriptor::kKey);
   Node* const context = Parameter(Descriptor::kContext);

@@ -2674,9 +2674,19 @@ ParserBase<Impl>::ParseAssignmentExpressionCoverGrammar() {
   } else if (expression->IsPattern() && op == Token::ASSIGN) {
     // Destructuring assignmment.
     if (expression->is_parenthesized()) {
-      expression_scope()->RecordPatternError(
-          Scanner::Location(lhs_beg_pos, end_position()),
-          MessageTemplate::kInvalidDestructuringTarget);
+      Scanner::Location loc(lhs_beg_pos, end_position());
+      if (expression_scope()->IsCertainlyDeclaration()) {
+        impl()->ReportMessageAt(loc,
+                                MessageTemplate::kInvalidDestructuringTarget);
+      } else {
+        // Reference Error if LHS is neither object literal nor an array literal
+        // (Parenthesized literals are
+        // CoverParenthesizedExpressionAndArrowParameterList).
+        // #sec-assignment-operators-static-semantics-early-errors
+        impl()->ReportMessageAt(loc, MessageTemplate::kInvalidLhsInAssignment,
+                                static_cast<const char*>(nullptr),
+                                kReferenceError);
+      }
     }
     expression_scope()->ValidateAsPattern(expression, lhs_beg_pos,
                                           end_position());
@@ -3727,9 +3737,14 @@ ParserBase<Impl>::ParseHoistableDeclaration(
   IdentifierT name;
   FunctionNameValidity name_validity;
   IdentifierT variable_name;
-  if (default_export && peek() == Token::LPAREN) {
-    impl()->GetDefaultStrings(&name, &variable_name);
-    name_validity = kSkipFunctionNameCheck;
+  if (peek() == Token::LPAREN) {
+    if (default_export) {
+      impl()->GetDefaultStrings(&name, &variable_name);
+      name_validity = kSkipFunctionNameCheck;
+    } else {
+      ReportMessage(MessageTemplate::kMissingFunctionName);
+      return impl()->NullStatement();
+    }
   } else {
     bool is_strict_reserved = Token::IsStrictReservedWord(peek());
     name = ParseIdentifier();

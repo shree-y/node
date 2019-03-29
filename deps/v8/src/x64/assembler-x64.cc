@@ -327,8 +327,8 @@ void Assembler::AllocateAndInstallRequestedHeapObjects(Isolate* isolate) {
     Address pc = reinterpret_cast<Address>(buffer_start_) + request.offset();
     switch (request.kind()) {
       case HeapObjectRequest::kHeapNumber: {
-        Handle<HeapNumber> object =
-            isolate->factory()->NewHeapNumber(request.heap_number(), TENURED);
+        Handle<HeapNumber> object = isolate->factory()->NewHeapNumber(
+            request.heap_number(), AllocationType::kOld);
         WriteUnalignedValue(pc, object);
         break;
       }
@@ -2829,6 +2829,21 @@ void Assembler::andps(XMMRegister dst, Operand src) {
   emit_sse_operand(dst, src);
 }
 
+void Assembler::andnps(XMMRegister dst, XMMRegister src) {
+  EnsureSpace ensure_space(this);
+  emit_optional_rex_32(dst, src);
+  emit(0x0F);
+  emit(0x55);
+  emit_sse_operand(dst, src);
+}
+
+void Assembler::andnps(XMMRegister dst, Operand src) {
+  EnsureSpace ensure_space(this);
+  emit_optional_rex_32(dst, src);
+  emit(0x0F);
+  emit(0x55);
+  emit_sse_operand(dst, src);
+}
 
 void Assembler::orps(XMMRegister dst, XMMRegister src) {
   EnsureSpace ensure_space(this);
@@ -3206,6 +3221,19 @@ void Assembler::pinsrb(XMMRegister dst, Operand src, int8_t imm8) {
 }
 
 void Assembler::insertps(XMMRegister dst, XMMRegister src, byte imm8) {
+  DCHECK(CpuFeatures::IsSupported(SSE4_1));
+  DCHECK(is_uint8(imm8));
+  EnsureSpace ensure_space(this);
+  emit(0x66);
+  emit_optional_rex_32(dst, src);
+  emit(0x0F);
+  emit(0x3A);
+  emit(0x21);
+  emit_sse_operand(dst, src);
+  emit(imm8);
+}
+
+void Assembler::insertps(XMMRegister dst, Operand src, byte imm8) {
   DCHECK(CpuFeatures::IsSupported(SSE4_1));
   DCHECK(is_uint8(imm8));
   EnsureSpace ensure_space(this);

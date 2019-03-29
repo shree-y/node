@@ -149,7 +149,7 @@ CompilationJob::Status UnoptimizedCompilationJob::ExecuteJob() {
 
 CompilationJob::Status UnoptimizedCompilationJob::FinalizeJob(
     Handle<SharedFunctionInfo> shared_info, Isolate* isolate) {
-  DCHECK(ThreadId::Current().Equals(isolate->thread_id()));
+  DCHECK_EQ(ThreadId::Current(), isolate->thread_id());
   DisallowCodeDependencyChange no_dependency_change;
   DisallowJavascriptExecution no_js(isolate);
 
@@ -200,7 +200,7 @@ void UnoptimizedCompilationJob::RecordFunctionCompilation(
 // Implementation of OptimizedCompilationJob
 
 CompilationJob::Status OptimizedCompilationJob::PrepareJob(Isolate* isolate) {
-  DCHECK(ThreadId::Current().Equals(isolate->thread_id()));
+  DCHECK_EQ(ThreadId::Current(), isolate->thread_id());
   DisallowJavascriptExecution no_js(isolate);
 
   if (FLAG_trace_opt && compilation_info()->IsOptimizing()) {
@@ -226,7 +226,7 @@ CompilationJob::Status OptimizedCompilationJob::ExecuteJob() {
 }
 
 CompilationJob::Status OptimizedCompilationJob::FinalizeJob(Isolate* isolate) {
-  DCHECK(ThreadId::Current().Equals(isolate->thread_id()));
+  DCHECK_EQ(ThreadId::Current(), isolate->thread_id());
   DisallowJavascriptExecution no_js(isolate);
 
   // Delegate to the underlying implementation.
@@ -320,8 +320,9 @@ void InstallBytecodeArray(Handle<BytecodeArray> bytecode_array,
   Handle<Code> code = isolate->factory()->CopyCode(Handle<Code>::cast(
       isolate->factory()->interpreter_entry_trampoline_for_profiling()));
 
-  Handle<InterpreterData> interpreter_data = Handle<InterpreterData>::cast(
-      isolate->factory()->NewStruct(INTERPRETER_DATA_TYPE, TENURED));
+  Handle<InterpreterData> interpreter_data =
+      Handle<InterpreterData>::cast(isolate->factory()->NewStruct(
+          INTERPRETER_DATA_TYPE, AllocationType::kOld));
 
   interpreter_data->set_bytecode_array(*bytecode_array);
   interpreter_data->set_interpreter_trampoline(*code);
@@ -360,16 +361,10 @@ void InstallUnoptimizedCode(UnoptimizedCompilationInfo* compilation_info,
 
     InstallBytecodeArray(compilation_info->bytecode_array(), shared_info,
                          parse_info, isolate);
-    if (FLAG_lite_mode) {
-      // Clear the feedback metadata field. In lite mode we don't need feedback
-      // metadata since we never allocate feedback vectors.
-      shared_info->set_raw_outer_scope_info_or_feedback_metadata(
-          ReadOnlyRoots(isolate).undefined_value());
-    } else {
-      Handle<FeedbackMetadata> feedback_metadata = FeedbackMetadata::New(
-          isolate, compilation_info->feedback_vector_spec());
-      shared_info->set_feedback_metadata(*feedback_metadata);
-    }
+
+    Handle<FeedbackMetadata> feedback_metadata = FeedbackMetadata::New(
+        isolate, compilation_info->feedback_vector_spec());
+    shared_info->set_feedback_metadata(*feedback_metadata);
   } else {
     DCHECK(compilation_info->has_asm_wasm_data());
     shared_info->set_asm_wasm_data(*compilation_info->asm_wasm_data());
@@ -786,6 +781,11 @@ MaybeHandle<Code> GetOptimizedCode(Handle<JSFunction> function,
   function->feedback_vector()->set_profiler_ticks(0);
 
   VMState<COMPILER> state(isolate);
+  TimerEventScope<TimerEventOptimizeCode> optimize_code_timer(isolate);
+  RuntimeCallTimerScope runtimeTimer(isolate,
+                                     RuntimeCallCounterId::kOptimizeCode);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8.compile"), "V8.OptimizeCode");
+
   DCHECK(!isolate->has_pending_exception());
   PostponeInterruptsScope postpone(isolate);
   bool has_script = shared->script()->IsScript();
@@ -810,11 +810,6 @@ MaybeHandle<Code> GetOptimizedCode(Handle<JSFunction> function,
     compilation_info->AbortOptimization(BailoutReason::kOptimizationDisabled);
     return MaybeHandle<Code>();
   }
-
-  TimerEventScope<TimerEventOptimizeCode> optimize_code_timer(isolate);
-  RuntimeCallTimerScope runtimeTimer(isolate,
-                                     RuntimeCallCounterId::kOptimizeCode);
-  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8.compile"), "V8.OptimizeCode");
 
   // In case of concurrent recompilation, all handles below this point will be
   // allocated in a deferred handle scope that is detached and handed off to
@@ -921,7 +916,7 @@ MaybeHandle<SharedFunctionInfo> CompileToplevel(
     IsCompiledScope* is_compiled_scope) {
   TimerEventScope<TimerEventCompileCode> top_level_timer(isolate);
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("v8.compile"), "V8.CompileCode");
-  DCHECK(ThreadId::Current().Equals(isolate->thread_id()));
+  DCHECK_EQ(ThreadId::Current(), isolate->thread_id());
 
   PostponeInterruptsScope postpone(isolate);
   DCHECK(!isolate->native_context().is_null());
@@ -1137,15 +1132,25 @@ bool Compiler::CollectSourcePositions(Isolate* isolate,
   DCHECK(shared_info->HasBytecodeArray());
   DCHECK(!shared_info->GetBytecodeArray()->HasSourcePositionTable());
 
+  // Collecting source positions requires allocating a new source position
+  // table.
+  DCHECK(AllowHeapAllocation::IsAllowed());
+
+  Handle<BytecodeArray> bytecode =
+      handle(shared_info->GetBytecodeArray(), isolate);
+
   // TODO(v8:8510): Push the CLEAR_EXCEPTION flag or something like it down into
   // the parser so it aborts without setting a pending exception, which then
   // gets thrown. This would avoid the situation where potentially we'd reparse
   // several times (running out of stack each time) before hitting this limit.
-  if (GetCurrentStackPosition() < isolate->stack_guard()->real_climit())
+  if (GetCurrentStackPosition() < isolate->stack_guard()->real_climit()) {
+    // Stack is already exhausted.
+    bytecode->SetSourcePositionsFailedToCollect();
     return false;
+  }
 
   DCHECK(AllowCompilation::IsAllowed(isolate));
-  DCHECK(ThreadId::Current().Equals(isolate->thread_id()));
+  DCHECK_EQ(ThreadId::Current(), isolate->thread_id());
   DCHECK(!isolate->has_pending_exception());
   VMState<BYTECODE_COMPILER> state(isolate);
   PostponeInterruptsScope postpone(isolate);
@@ -1163,6 +1168,8 @@ bool Compiler::CollectSourcePositions(Isolate* isolate,
 
   // Parse and update ParseInfo with the results.
   if (!parsing::ParseAny(&parse_info, shared_info, isolate)) {
+    // Parsing failed probably as a result of stack exhaustion.
+    bytecode->SetSourcePositionsFailedToCollect();
     return FailWithPendingException(
         isolate, &parse_info, Compiler::ClearExceptionFlag::CLEAR_EXCEPTION);
   }
@@ -1175,6 +1182,8 @@ bool Compiler::CollectSourcePositions(Isolate* isolate,
       GenerateUnoptimizedCode(&parse_info, isolate->allocator(),
                               &inner_function_jobs));
   if (!outer_function_job) {
+    // Recompiling failed probably as a result of stack exhaustion.
+    bytecode->SetSourcePositionsFailedToCollect();
     return FailWithPendingException(
         isolate, &parse_info, Compiler::ClearExceptionFlag::CLEAR_EXCEPTION);
   }
@@ -1199,14 +1208,20 @@ bool Compiler::CollectSourcePositions(Isolate* isolate,
   }
 
   // Update the source position table on the original bytecode.
-  Handle<BytecodeArray> bytecode =
-      handle(shared_info->GetBytecodeArray(), isolate);
   DCHECK(bytecode->IsBytecodeEqual(
       *outer_function_job->compilation_info()->bytecode_array()));
   DCHECK(outer_function_job->compilation_info()->has_bytecode_array());
-  bytecode->set_source_position_table(outer_function_job->compilation_info()
-                                          ->bytecode_array()
-                                          ->SourcePositionTable());
+  ByteArray source_position_table = outer_function_job->compilation_info()
+                                        ->bytecode_array()
+                                        ->SourcePositionTable();
+  bytecode->set_source_position_table(source_position_table);
+  // If debugging, make sure that instrumented bytecode has the source position
+  // table set on it as well.
+  if (shared_info->HasDebugInfo() &&
+      shared_info->GetDebugInfo()->HasInstrumentedBytecodeArray()) {
+    shared_info->GetDebugBytecodeArray()->set_source_position_table(
+        source_position_table);
+  }
 
   DCHECK(!isolate->has_pending_exception());
   DCHECK(shared_info->is_compiled_scope().is_compiled());
@@ -1222,7 +1237,7 @@ bool Compiler::Compile(Handle<SharedFunctionInfo> shared_info,
 
   Isolate* isolate = shared_info->GetIsolate();
   DCHECK(AllowCompilation::IsAllowed(isolate));
-  DCHECK(ThreadId::Current().Equals(isolate->thread_id()));
+  DCHECK_EQ(ThreadId::Current(), isolate->thread_id());
   DCHECK(!isolate->has_pending_exception());
   DCHECK(!shared_info->HasBytecodeArray());
   VMState<BYTECODE_COMPILER> state(isolate);
@@ -1310,8 +1325,8 @@ bool Compiler::Compile(Handle<JSFunction> function, ClearExceptionFlag flag,
   DCHECK(is_compiled_scope->is_compiled());
   Handle<Code> code = handle(shared_info->GetCode(), isolate);
 
-  // Allocate FeedbackVector for the JSFunction.
-  JSFunction::EnsureFeedbackVector(function);
+  // Initialize the feedback cell for this JSFunction.
+  JSFunction::InitializeFeedbackCell(function);
 
   // Optimize now if --always-opt is enabled.
   if (FLAG_always_opt && !function->shared()->HasAsmWasmData()) {
@@ -1477,6 +1492,10 @@ MaybeHandle<JSFunction> Compiler::GetFunctionFromEval(
       }
     }
     script->set_eval_from_position(eval_position);
+    TRACE_EVENT_OBJECT_SNAPSHOT_WITH_ID(
+        TRACE_DISABLED_BY_DEFAULT("v8.compile"), "Script",
+        TRACE_ID_WITH_SCOPE(Script::kTraceScope, script->id()),
+        script->ToTracedValue());
 
     parse_info.set_eval();
     parse_info.set_language_mode(language_mode);
@@ -1501,11 +1520,11 @@ MaybeHandle<JSFunction> Compiler::GetFunctionFromEval(
   if (eval_result.has_shared()) {
     if (eval_result.has_feedback_cell()) {
       result = isolate->factory()->NewFunctionFromSharedFunctionInfo(
-          shared_info, context, feedback_cell, NOT_TENURED);
+          shared_info, context, feedback_cell, AllocationType::kYoung);
     } else {
       result = isolate->factory()->NewFunctionFromSharedFunctionInfo(
-          shared_info, context, NOT_TENURED);
-      JSFunction::EnsureFeedbackVector(result);
+          shared_info, context, AllocationType::kYoung);
+      JSFunction::InitializeFeedbackCell(result);
       if (allow_eval_cache) {
         // Make sure to cache this result.
         Handle<FeedbackCell> new_feedback_cell(result->raw_feedback_cell(),
@@ -1516,8 +1535,8 @@ MaybeHandle<JSFunction> Compiler::GetFunctionFromEval(
     }
   } else {
     result = isolate->factory()->NewFunctionFromSharedFunctionInfo(
-        shared_info, context, NOT_TENURED);
-    JSFunction::EnsureFeedbackVector(result);
+        shared_info, context, AllocationType::kYoung);
+    JSFunction::InitializeFeedbackCell(result);
     if (allow_eval_cache) {
       // Add the SharedFunctionInfo and the LiteralsArray to the eval cache if
       // we didn't retrieve from there.
@@ -1800,6 +1819,10 @@ Handle<Script> NewScript(Isolate* isolate, ParseInfo* parse_info,
     script->set_host_defined_options(*host_defined_options);
   }
   LOG(isolate, ScriptDetails(*script));
+  TRACE_EVENT_OBJECT_SNAPSHOT_WITH_ID(
+      TRACE_DISABLED_BY_DEFAULT("v8.compile"), "Script",
+      TRACE_ID_WITH_SCOPE(Script::kTraceScope, script->id()),
+      script->ToTracedValue());
   return script;
 }
 
@@ -1891,8 +1914,7 @@ MaybeHandle<SharedFunctionInfo> Compiler::GetSharedFunctionInfoForScript(
       DCHECK(is_compiled_scope.is_compiled());
       compilation_cache->PutScript(source, isolate->native_context(),
                                    language_mode, result);
-    } else if (maybe_result.is_null() && natives != EXTENSION_CODE &&
-               natives != NATIVES_CODE) {
+    } else if (maybe_result.is_null() && natives != EXTENSION_CODE) {
       isolate->ReportPendingMessages();
     }
   }
@@ -1979,8 +2001,8 @@ MaybeHandle<JSFunction> Compiler::GetWrappedFunction(
   }
   DCHECK(is_compiled_scope.is_compiled());
 
-  return isolate->factory()->NewFunctionFromSharedFunctionInfo(wrapped, context,
-                                                               NOT_TENURED);
+  return isolate->factory()->NewFunctionFromSharedFunctionInfo(
+      wrapped, context, AllocationType::kYoung);
 }
 
 MaybeHandle<SharedFunctionInfo>
@@ -2135,7 +2157,7 @@ bool Compiler::FinalizeOptimizedCompilationJob(OptimizedCompilationJob* job,
 }
 
 void Compiler::PostInstantiation(Handle<JSFunction> function,
-                                 PretenureFlag pretenure) {
+                                 AllocationType allocation) {
   Isolate* isolate = function->GetIsolate();
   Handle<SharedFunctionInfo> shared(function->shared(), isolate);
   IsCompiledScope is_compiled_scope(shared->is_compiled_scope());
@@ -2143,7 +2165,7 @@ void Compiler::PostInstantiation(Handle<JSFunction> function,
   // If code is compiled to bytecode (i.e., isn't asm.js), then allocate a
   // feedback and check for optimized code.
   if (is_compiled_scope.is_compiled() && shared->HasBytecodeArray()) {
-    JSFunction::EnsureFeedbackVector(function);
+    JSFunction::InitializeFeedbackCell(function);
 
     Code code = function->has_feedback_vector()
                     ? function->feedback_vector()->optimized_code()
@@ -2158,6 +2180,7 @@ void Compiler::PostInstantiation(Handle<JSFunction> function,
     if (FLAG_always_opt && shared->allows_lazy_compilation() &&
         !shared->optimization_disabled() && !function->IsOptimized() &&
         !function->HasOptimizedCode()) {
+      JSFunction::EnsureFeedbackVector(function);
       function->MarkForOptimization(ConcurrencyMode::kNotConcurrent);
     }
   }

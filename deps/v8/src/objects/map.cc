@@ -56,6 +56,18 @@ MaybeHandle<JSFunction> Map::GetConstructorFunction(
   return MaybeHandle<JSFunction>();
 }
 
+bool Map::IsMapOfGlobalProxy(Handle<NativeContext> native_context) const {
+  DisallowHeapAllocation no_gc;
+  if (IsJSGlobalProxyMap()) {
+    Object maybe_constructor = GetConstructor();
+    // Detached global proxies have |null| as their constructor.
+    return maybe_constructor.IsJSFunction() &&
+           JSFunction::cast(maybe_constructor).native_context() ==
+               *native_context;
+  }
+  return false;
+}
+
 void Map::PrintReconfiguration(Isolate* isolate, FILE* file, int modify_index,
                                PropertyKind kind,
                                PropertyAttributes attributes) {
@@ -121,6 +133,7 @@ VisitorId Map::GetVisitorId(Map map) {
 
     case FIXED_ARRAY_TYPE:
     case OBJECT_BOILERPLATE_DESCRIPTION_TYPE:
+    case CLOSURE_FEEDBACK_CELL_ARRAY_TYPE:
     case HASH_TABLE_TYPE:
     case ORDERED_HASH_MAP_TYPE:
     case ORDERED_HASH_SET_TYPE:
@@ -1029,8 +1042,10 @@ Map Map::TryUpdateSlow(Isolate* isolate, Map old_map) {
                  .SearchSpecial(info.integrity_level_symbol);
   }
 
-  DCHECK_EQ(old_map->elements_kind(), result->elements_kind());
-  DCHECK_EQ(old_map->instance_type(), result->instance_type());
+  DCHECK_IMPLIES(!result.is_null(),
+                 old_map->elements_kind() == result->elements_kind());
+  DCHECK_IMPLIES(!result.is_null(),
+                 old_map->instance_type() == result->instance_type());
   return result;
 }
 
@@ -1515,12 +1530,9 @@ Handle<Map> Map::Normalize(Isolate* isolate, Handle<Map> fast_map,
                   MaybeObject::FromObject(Smi::kZero));
         STATIC_ASSERT(kDescriptorsOffset ==
                       kTransitionsOrPrototypeInfoOffset + kTaggedSize);
-        DCHECK_EQ(
-            0,
-            memcmp(
-                HeapObject::RawField(*fresh, kDescriptorsOffset).ToVoidPtr(),
-                HeapObject::RawField(*new_map, kDescriptorsOffset).ToVoidPtr(),
-                kDependentCodeOffset - kDescriptorsOffset));
+        DCHECK_EQ(0, memcmp(fresh->RawField(kDescriptorsOffset).ToVoidPtr(),
+                            new_map->RawField(kDescriptorsOffset).ToVoidPtr(),
+                            kDependentCodeOffset - kDescriptorsOffset));
       } else {
         DCHECK_EQ(0, memcmp(reinterpret_cast<void*>(fresh->address()),
                             reinterpret_cast<void*>(new_map->address()),
@@ -2669,7 +2681,7 @@ Handle<Map> Map::TransitionToPrototype(Isolate* isolate, Handle<Map> map,
 
 Handle<NormalizedMapCache> NormalizedMapCache::New(Isolate* isolate) {
   Handle<WeakFixedArray> array(
-      isolate->factory()->NewWeakFixedArray(kEntries, TENURED));
+      isolate->factory()->NewWeakFixedArray(kEntries, AllocationType::kOld));
   return Handle<NormalizedMapCache>::cast(array);
 }
 

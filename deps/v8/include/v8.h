@@ -118,6 +118,7 @@ class Arguments;
 class DeferredHandles;
 class Heap;
 class HeapObject;
+class ExternalString;
 class Isolate;
 class LocalEmbedderHeapTracer;
 class MicrotaskQueue;
@@ -549,7 +550,7 @@ template <class T> class PersistentBase {
    * is alive. Only allowed when the embedder is asked to trace its heap by
    * EmbedderHeapTracer.
    */
-  V8_DEPRECATE_SOON(
+  V8_DEPRECATED(
       "Used TracedGlobal and EmbedderHeapTracer::RegisterEmbedderReference",
       V8_INLINE void RegisterExternalReference(Isolate* isolate) const);
 
@@ -572,13 +573,9 @@ template <class T> class PersistentBase {
    *
    * This bit is cleared after the each garbage collection pass.
    */
-  V8_DEPRECATE_SOON("Use TracedGlobal.", V8_INLINE void MarkActive());
+  V8_DEPRECATED("Use TracedGlobal.", V8_INLINE void MarkActive());
 
   V8_DEPRECATED("See MarkIndependent.", V8_INLINE bool IsIndependent() const);
-
-  /** Checks if the handle holds the only reference to an object. */
-  V8_DEPRECATED("Garbage collection internal state should not be relied on.",
-                V8_INLINE bool IsNearDeath() const);
 
   /** Returns true if the handle's reference is weak.  */
   V8_INLINE bool IsWeak() const;
@@ -2801,7 +2798,7 @@ class V8_EXPORT String : public Name {
     void operator=(const ExternalStringResourceBase&) = delete;
 
    private:
-    friend class internal::Heap;
+    friend class internal::ExternalString;
     friend class v8::String;
     friend class internal::ScopedExternalStringLock;
   };
@@ -6684,7 +6681,7 @@ typedef void (*HostInitializeImportMetaObjectCallback)(Local<Context> context,
  * first accessed. The return value will be used as the stack value. If this
  * callback is registed, the |Error.prepareStackTrace| API will be disabled.
  * |sites| is an array of call sites, specified in
- * https://github.com/v8/v8/wiki/Stack-Trace-API
+ * https://v8.dev/docs/stack-trace-api
  */
 typedef MaybeLocal<Value> (*PrepareStackTraceCallback)(Local<Context> context,
                                                        Local<Value> error,
@@ -6738,7 +6735,8 @@ class PromiseRejectMessage {
 typedef void (*PromiseRejectCallback)(PromiseRejectMessage message);
 
 // --- Microtasks Callbacks ---
-typedef void (*MicrotasksCompletedCallback)(Isolate*);
+V8_DEPRECATE_SOON("Use *WithData version.",
+                  typedef void (*MicrotasksCompletedCallback)(Isolate*));
 typedef void (*MicrotasksCompletedCallbackWithData)(Isolate*, void*);
 typedef void (*MicrotaskCallback)(void* data);
 
@@ -8521,17 +8519,6 @@ class V8_EXPORT Isolate {
 
   /**
    * Iterates through all the persistent handles in the current isolate's heap
-   * that have class_ids and are candidates to be marked as partially dependent
-   * handles. This will visit handles to young objects created since the last
-   * garbage collection but is free to visit an arbitrary superset of these
-   * objects.
-   */
-  V8_DEPRECATED(
-      "Use VisitHandlesWithClassIds",
-      void VisitHandlesForPartialDependence(PersistentHandleVisitor* visitor));
-
-  /**
-   * Iterates through all the persistent handles in the current isolate's heap
    * that have class_ids and are weak to be marked as inactive if there is no
    * pending activity for the handle.
    */
@@ -9782,17 +9769,6 @@ bool PersistentBase<T>::IsIndependent() const {
   return I::GetNodeFlag(reinterpret_cast<internal::Address*>(this->val_),
                         I::kNodeIsIndependentShift);
 }
-
-template <class T>
-bool PersistentBase<T>::IsNearDeath() const {
-  typedef internal::Internals I;
-  if (this->IsEmpty()) return false;
-  uint8_t node_state =
-      I::GetNodeState(reinterpret_cast<internal::Address*>(this->val_));
-  return node_state == I::kNodeStateIsNearDeathValue ||
-      node_state == I::kNodeStateIsPendingValue;
-}
-
 
 template <class T>
 bool PersistentBase<T>::IsWeak() const {

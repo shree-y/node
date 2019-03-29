@@ -384,8 +384,6 @@ class ExitFrame: public StackFrame {
 
   Code unchecked_code() const override;
 
-  Address& code_slot() const;
-
   // Garbage collection support.
   void Iterate(RootVisitor* v) const override;
 
@@ -484,6 +482,8 @@ class FrameSummary {
                            int code_offset, bool is_constructor,
                            FixedArray parameters);
 
+    void EnsureSourcePositionsAvailable();
+
     Handle<Object> receiver() const { return receiver_; }
     Handle<JSFunction> function() const { return function_; }
     Handle<AbstractCode> abstract_code() const { return abstract_code_; }
@@ -570,6 +570,8 @@ class FrameSummary {
   static FrameSummary GetBottom(const StandardFrame* frame);
   static FrameSummary GetSingle(const StandardFrame* frame);
   static FrameSummary Get(const StandardFrame* frame, int index);
+
+  void EnsureSourcePositionsAvailable();
 
   // Dispatched accessors.
   Handle<Object> receiver() const;

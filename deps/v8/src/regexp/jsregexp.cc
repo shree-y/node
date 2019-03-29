@@ -477,27 +477,40 @@ int RegExpImpl::IrregexpExecRaw(Isolate* isolate, Handle<JSRegExp> regexp,
     int number_of_capture_registers =
         (IrregexpNumberOfCaptures(*irregexp) + 1) * 2;
     int32_t* raw_output = &output[number_of_capture_registers];
-    // We do not touch the actual capture result registers until we know there
-    // has been a match so that we can use those capture results to set the
-    // last match info.
-    for (int i = number_of_capture_registers - 1; i >= 0; i--) {
-      raw_output[i] = -1;
-    }
-    Handle<ByteArray> byte_codes(IrregexpByteCode(*irregexp, is_one_byte),
-                                 isolate);
 
-    IrregexpResult result = IrregexpInterpreter::Match(
-        isolate, byte_codes, subject, raw_output, index);
-    if (result == RE_SUCCESS) {
-      // Copy capture results to the start of the registers array.
-      MemCopy(output, raw_output,
-              number_of_capture_registers * sizeof(int32_t));
-    }
-    if (result == RE_EXCEPTION) {
-      DCHECK(!isolate->has_pending_exception());
-      isolate->StackOverflow();
-    }
-    return result;
+    do {
+      // We do not touch the actual capture result registers until we know there
+      // has been a match so that we can use those capture results to set the
+      // last match info.
+      for (int i = number_of_capture_registers - 1; i >= 0; i--) {
+        raw_output[i] = -1;
+      }
+      Handle<ByteArray> byte_codes(IrregexpByteCode(*irregexp, is_one_byte),
+                                   isolate);
+
+      IrregexpInterpreter::Result result = IrregexpInterpreter::Match(
+          isolate, byte_codes, subject, raw_output, index);
+      DCHECK_IMPLIES(result == IrregexpInterpreter::EXCEPTION,
+                     isolate->has_pending_exception());
+
+      switch (result) {
+        case IrregexpInterpreter::SUCCESS:
+          // Copy capture results to the start of the registers array.
+          MemCopy(output, raw_output,
+                  number_of_capture_registers * sizeof(int32_t));
+          return result;
+        case IrregexpInterpreter::EXCEPTION:
+        case IrregexpInterpreter::FAILURE:
+          return result;
+        case IrregexpInterpreter::RETRY:
+          // The string has changed representation, and we must restart the
+          // match.
+          is_one_byte = String::IsOneByteRepresentationUnderneath(*subject);
+          EnsureCompiledIrregexp(isolate, regexp, subject, is_one_byte);
+          break;
+      }
+    } while (true);
+    UNREACHABLE();
   }
 }
 
@@ -1794,7 +1807,7 @@ static void EmitUseLookupTable(
   }
   Factory* factory = masm->isolate()->factory();
   // TODO(erikcorry): Cache these.
-  Handle<ByteArray> ba = factory->NewByteArray(kSize, TENURED);
+  Handle<ByteArray> ba = factory->NewByteArray(kSize, AllocationType::kOld);
   for (int i = 0; i < kSize; i++) {
     ba->set(i, templ[i]);
   }
@@ -3747,7 +3760,8 @@ void BoyerMooreLookahead::EmitSkipInstructions(RegExpMacroAssembler* masm) {
   }
 
   Factory* factory = masm->isolate()->factory();
-  Handle<ByteArray> boolean_skip_table = factory->NewByteArray(kSize, TENURED);
+  Handle<ByteArray> boolean_skip_table =
+      factory->NewByteArray(kSize, AllocationType::kOld);
   int skip_distance = GetSkipTable(
       min_lookahead, max_lookahead, boolean_skip_table);
   DCHECK_NE(0, skip_distance);

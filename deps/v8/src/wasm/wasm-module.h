@@ -103,8 +103,6 @@ struct WasmTable {
   uint32_t initial_size = 0;      // initial table size.
   uint32_t maximum_size = 0;      // maximum table size.
   bool has_maximum_size = false;  // true if there is a maximum size.
-  // TODO(titzer): Move this to WasmInstance. Needed by interpreter only.
-  std::vector<int32_t> values;  // function table, -1 indicating invalid.
   bool imported = false;        // true if imported.
   bool exported = false;        // true if exported.
 };
@@ -132,17 +130,37 @@ struct WasmElemSegment {
 
 // Static representation of a wasm import.
 struct WasmImport {
-  WireBytesRef module_name;  // module name.
-  WireBytesRef field_name;   // import name.
+  WireBytesRef module_name;   // module name.
+  WireBytesRef field_name;    // import name.
   ImportExportKindCode kind;  // kind of the import.
-  uint32_t index;            // index into the respective space.
+  uint32_t index;             // index into the respective space.
 };
 
 // Static representation of a wasm export.
 struct WasmExport {
-  WireBytesRef name;      // exported name.
+  WireBytesRef name;          // exported name.
   ImportExportKindCode kind;  // kind of the export.
-  uint32_t index;         // index into the respective space.
+  uint32_t index;             // index into the respective space.
+};
+
+enum class WasmCompilationHintStrategy : uint8_t {
+  kDefault = 0,
+  kLazy = 1,
+  kEager = 2,
+};
+
+enum class WasmCompilationHintTier : uint8_t {
+  kDefault = 0,
+  kInterpreter = 1,
+  kBaseline = 2,
+  kOptimized = 3,
+};
+
+// Static representation of a wasm compilation hint
+struct WasmCompilationHint {
+  WasmCompilationHintStrategy strategy;
+  WasmCompilationHintTier first_tier;
+  WasmCompilationHintTier second_tier;
 };
 
 enum ModuleOrigin : uint8_t { kWasmOrigin, kAsmJsOrigin };
@@ -187,6 +205,7 @@ struct V8_EXPORT_PRIVATE WasmModule {
   std::vector<WasmExport> export_table;
   std::vector<WasmException> exceptions;
   std::vector<WasmElemSegment> elem_segments;
+  std::vector<WasmCompilationHint> compilation_hints;
   SignatureMap signature_map;  // canonicalizing map for signature indexes.
 
   ModuleOrigin origin = kWasmOrigin;  // origin of the module

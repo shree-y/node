@@ -360,12 +360,10 @@ struct ElementAccessExpression : LocationExpression {
 struct FieldAccessExpression : LocationExpression {
   DEFINE_AST_NODE_LEAF_BOILERPLATE(FieldAccessExpression)
   FieldAccessExpression(SourcePosition pos, Expression* object,
-                        std::string field)
-      : LocationExpression(kKind, pos),
-        object(object),
-        field(std::move(field)) {}
+                        Identifier* field)
+      : LocationExpression(kKind, pos), object(object), field(field) {}
   Expression* object;
-  std::string field;
+  Identifier* field;
 };
 
 struct AssignmentExpression : Expression {
@@ -667,18 +665,18 @@ struct BlockStatement : Statement {
 struct TypeDeclaration : Declaration {
   DEFINE_AST_NODE_LEAF_BOILERPLATE(TypeDeclaration)
   TypeDeclaration(SourcePosition pos, Identifier* name, bool transient,
-                  base::Optional<std::string> extends,
+                  base::Optional<Identifier*> extends,
                   base::Optional<std::string> generates,
                   base::Optional<std::string> constexpr_generates)
       : Declaration(kKind, pos),
         name(name),
         transient(transient),
-        extends(std::move(extends)),
+        extends(extends),
         generates(std::move(generates)),
         constexpr_generates(std::move(constexpr_generates)) {}
   Identifier* name;
   bool transient;
-  base::Optional<std::string> extends;
+  base::Optional<Identifier*> extends;
   base::Optional<std::string> generates;
   base::Optional<std::string> constexpr_generates;
 };

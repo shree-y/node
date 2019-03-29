@@ -448,7 +448,7 @@ class Isolate final : private HiddenFactory {
 #endif
 
     bool Matches(Isolate* isolate, ThreadId thread_id) const {
-      return isolate_ == isolate && thread_id_.Equals(thread_id);
+      return isolate_ == isolate && thread_id_ == thread_id;
     }
 
    private:
@@ -640,7 +640,7 @@ class Isolate final : private HiddenFactory {
   inline Handle<JSGlobalObject> global_object();
 
   // Returns the global proxy object of the current context.
-  inline Handle<JSObject> global_proxy();
+  inline Handle<JSGlobalProxy> global_proxy();
 
   static int ArchiveSpacePerThread() { return sizeof(ThreadLocalTop); }
   void FreeThreadResources() { thread_local_top()->Free(); }

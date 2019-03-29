@@ -23,6 +23,7 @@
 #include "src/objects/heap-number.h"
 #include "src/objects/js-array-buffer.h"
 #include "src/objects/js-collection.h"
+#include "src/objects/js-proxy.h"
 #include "src/objects/map.h"
 #include "src/objects/maybe-object.h"
 #include "src/objects/oddball.h"
@@ -953,7 +954,7 @@ class V8_EXPORT_PRIVATE CodeAssembler {
 
   // Optimized memory operations that map to Turbofan simplified nodes.
   TNode<HeapObject> OptimizedAllocate(TNode<IntPtrT> size,
-                                      PretenureFlag pretenure);
+                                      AllocationType allocation);
   void OptimizedStoreField(MachineRepresentation rep, TNode<HeapObject> object,
                            int offset, Node* value,
                            WriteBarrierKind write_barrier);

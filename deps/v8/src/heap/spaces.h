@@ -407,8 +407,7 @@ class MemoryChunk {
   static const int kPageSize = 1 << kPageSizeBits;
 
   // Maximum number of nested code memory modification scopes.
-  // TODO(6792,mstarzinger): Drop to 3 or lower once WebAssembly is off heap.
-  static const int kMaxWriteUnprotectCounter = 4;
+  static const int kMaxWriteUnprotectCounter = 3;
 
   static Address BaseAddress(Address a) { return a & ~kAlignmentMask; }
 
@@ -1949,7 +1948,7 @@ class V8_EXPORT_PRIVATE FreeList {
   static const size_t kTinyListMax = 0x1f * kTaggedSize;
   static const size_t kSmallListMax = 0xff * kTaggedSize;
   static const size_t kMediumListMax = 0x7ff * kTaggedSize;
-  static const size_t kLargeListMax = 0x2fff * kTaggedSize;
+  static const size_t kLargeListMax = 0x1fff * kTaggedSize;
   static const size_t kTinyAllocationMax = kTiniestListMax;
   static const size_t kSmallAllocationMax = kTinyListMax;
   static const size_t kMediumAllocationMax = kSmallListMax;
@@ -2993,6 +2992,9 @@ class ReadOnlySpace : public PagedSpace {
 
   void ClearStringPaddingIfNeeded();
   void MarkAsReadOnly();
+  // Make the heap forget the space for memory bookkeeping purposes
+  // (e.g. prevent space's memory from registering as leaked).
+  void Forget();
 
   // During boot the free_space_map is created, and afterwards we may need
   // to write it into the free list nodes that were already created.

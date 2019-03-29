@@ -458,13 +458,18 @@ ACCESSORS(JSBoundFunction, bound_arguments, FixedArray, kBoundArgumentsOffset)
 ACCESSORS(JSFunction, raw_feedback_cell, FeedbackCell, kFeedbackCellOffset)
 
 ACCESSORS(JSGlobalObject, native_context, NativeContext, kNativeContextOffset)
-ACCESSORS(JSGlobalObject, global_proxy, JSObject, kGlobalProxyOffset)
+ACCESSORS(JSGlobalObject, global_proxy, JSGlobalProxy, kGlobalProxyOffset)
 
 ACCESSORS(JSGlobalProxy, native_context, Object, kNativeContextOffset)
 
 FeedbackVector JSFunction::feedback_vector() const {
   DCHECK(has_feedback_vector());
   return FeedbackVector::cast(raw_feedback_cell()->value());
+}
+
+ClosureFeedbackCellArray JSFunction::closure_feedback_cell_array() const {
+  DCHECK(has_closure_feedback_cell_array());
+  return ClosureFeedbackCellArray::cast(raw_feedback_cell()->value());
 }
 
 // Code objects that are marked for deoptimization are not considered to be
@@ -584,7 +589,12 @@ void JSFunction::SetOptimizationMarker(OptimizationMarker marker) {
 
 bool JSFunction::has_feedback_vector() const {
   return shared()->is_compiled() &&
-         !raw_feedback_cell()->value()->IsUndefined();
+         raw_feedback_cell()->value()->IsFeedbackVector();
+}
+
+bool JSFunction::has_closure_feedback_cell_array() const {
+  return shared()->is_compiled() &&
+         raw_feedback_cell()->value()->IsClosureFeedbackCellArray();
 }
 
 Context JSFunction::context() {
@@ -709,11 +719,11 @@ ACCESSORS(JSDate, min, Object, kMinOffset)
 ACCESSORS(JSDate, sec, Object, kSecOffset)
 
 MessageTemplate JSMessageObject::type() const {
-  Object value = READ_FIELD(*this, kTypeOffset);
+  Object value = READ_FIELD(*this, kMessageTypeOffset);
   return MessageTemplateFromInt(Smi::ToInt(value));
 }
 void JSMessageObject::set_type(MessageTemplate value) {
-  WRITE_FIELD(*this, kTypeOffset, Smi::FromInt(static_cast<int>(value)));
+  WRITE_FIELD(*this, kMessageTypeOffset, Smi::FromInt(static_cast<int>(value)));
 }
 ACCESSORS(JSMessageObject, argument, Object, kArgumentsOffset)
 ACCESSORS(JSMessageObject, script, Script, kScriptOffset)
@@ -954,7 +964,7 @@ Maybe<PropertyAttributes> JSReceiver::GetOwnElementAttributes(
 }
 
 bool JSGlobalObject::IsDetached() {
-  return JSGlobalProxy::cast(global_proxy())->IsDetachedFrom(*this);
+  return global_proxy()->IsDetachedFrom(*this);
 }
 
 bool JSGlobalProxy::IsDetachedFrom(JSGlobalObject global) const {
